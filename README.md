@@ -37,12 +37,12 @@ ken/kn n [пакет]    - Установка без проверки завис
    cd sake
 
 4. Скомпилируйте и установите:
-   go build -o kn main.go
+   go build -o ken main.go
    
-   sudo mv kn /usr/local/bin/
+   sudo mv ken /usr/local/bin/
 
 6. (Опционально) Настройте беспарольный режим:
-   kn visudo
+   ken visudo
 
 ## Обновление
 
