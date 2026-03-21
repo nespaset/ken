@@ -17,24 +17,18 @@ type AurResponse struct {
 }
 
 func main() {
-	// Поддержка двух команд: ken и kn
-	exeName := os.Args[0]
-	if strings.Contains(exeName, "kn") {
-		// Логика для короткой команды kn (если захочешь кастомное поведение)
-	}
-	
 	if len(os.Args) < 2 {
 		showHelp()
 		return
 	}
-	
+
 	cmd := os.Args[1]
-	
+
 	if cmd == "h" || cmd == "help" {
 		showHelp()
 		return
 	}
-	
+
 	if cmd == "visudo" {
 		fmt.Println("🦭 Настройка беспарольного режима для Ken...")
 		user := os.Getenv("USER")
@@ -46,16 +40,15 @@ func main() {
 		}
 		return
 	}
-	
-	// Авто-обновление из репозитория Ken
+
 	checkUpdate("nespaset")
-	
+
 	exec.Command("sudo", "-v").Run()
-	
+
 	nodeps := false
 	autoYes := false
 	pkgIndex := 1
-	
+
 	if len(os.Args) > 2 {
 		if cmd == "y" {
 			autoYes = true
@@ -69,9 +62,9 @@ func main() {
 			pkgIndex = 2
 		}
 	}
-	
+
 	target := os.Args[pkgIndex]
-	
+
 	switch target {
 		case "u":
 			runCommand("sudo", "pacman", "-Syyu", "--noconfirm")
@@ -87,31 +80,42 @@ func main() {
 }
 
 func checkUpdate(user string) {
-	url := "https://api.github.com" + "/repos/" + user + "/ken/commits/main"
+	apiURL := "https://api.github.com" + "/repos/nespaset/ken/commits/main"
 	client := http.Client{Timeout: 2 * time.Second}
-	resp, err := client.Get(url)
+	resp, err := client.Get(apiURL)
 	if err != nil { return }
 	defer resp.Body.Close()
-	
+
 	var data struct {
+		SHA    string `json:"sha"`
 		Commit struct { Message string `json:"message"` } `json:"commit"`
 	}
 	json.NewDecoder(resp.Body).Decode(&data)
-	
-	if strings.Contains(strings.ToLower(data.Commit.Message), "update") {
-		fmt.Printf("🗡️ Доступна новая заточка Ken: %s\nОбновиться? [y/N]: ", data.Commit.Message)
+
+	home, _ := os.UserHomeDir()
+	configDir := home + "/.config/ken"
+	lastSHAFile := configDir + "/last_commit"
+	oldSHA, _ := os.ReadFile(lastSHAFile)
+
+	if string(oldSHA) != data.SHA && strings.Contains(strings.ToLower(data.Commit.Message), "update") {
+		fmt.Printf("🗡️ Новая заточка Ken: %s\nОбновиться? [y/N]: ", data.Commit.Message)
 		var choice string
 		fmt.Scanln(&choice)
 		if strings.ToLower(choice) == "y" {
 			fmt.Println("🗡️ Перековка Ken...")
 			tmp := "/tmp/ken-upgrade"
 			os.RemoveAll(tmp)
-			runCommand("git", "clone", "https://github.com/nespaset/ken", tmp)
+			// Ссылка через +
+			gitURL := "https://github.com" + "/nespaset/ken"
+			runCommand("git", "clone", gitURL, tmp)
 			os.Chdir(tmp)
 			runCommand("go", "build", "-o", "ken", "main.go")
 			runCommand("sudo", "mv", "ken", "/usr/local/bin/ken")
-			// Создаем симлинк для kn
 			runCommand("sudo", "ln", "-sf", "/usr/local/bin/ken", "/usr/local/bin/kn")
+
+			os.MkdirAll(configDir, 0755)
+			os.WriteFile(lastSHAFile, []byte(data.SHA), 0644)
+
 			fmt.Println("Ken обновлен! Используйте ken или kn.")
 			os.Exit(0)
 		}
@@ -136,27 +140,27 @@ func installPackage(pkg string, nodeps bool, autoYes bool) {
 		}
 		return
 	}
-	
+
 	aurURL := "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=" + pkg
 	resp, _ := http.Get(aurURL)
 	defer resp.Body.Close()
 	var aur AurResponse
 	json.NewDecoder(resp.Body).Decode(&aur)
-	
+
 	if len(aur.Results) == 0 {
 		search(pkg)
 		return
 	}
-	
+
 	gitURL := "https://aur.archlinux.org" + "/" + pkg + ".git"
 	tmpDir := "/tmp/ken-" + pkg
 	os.RemoveAll(tmpDir)
 	runCommand("git", "clone", "--depth=1", gitURL, tmpDir)
 	os.Chdir(tmpDir)
-	
+
 	mkArgs := []string{"-si", "--noconfirm"}
 	if nodeps { mkArgs = append(mkArgs, "-d") }
-	
+
 	if err := runCommand("makepkg", mkArgs...); err != nil && !nodeps {
 		out, _ := exec.Command("makepkg", "--printsrcinfo").Output()
 		lines := strings.Split(string(out), "\n")
@@ -167,7 +171,7 @@ func installPackage(pkg string, nodeps bool, autoYes bool) {
 				deps = append(deps, strings.Fields(d)[0])
 			}
 		}
-		
+
 		if len(deps) > 0 {
 			answer := "y"
 			if !autoYes {
@@ -188,8 +192,8 @@ func installPackage(pkg string, nodeps bool, autoYes bool) {
 }
 
 func search(q string) {
-	u := "https://aur.archlinux.org/rpc/?v=5&type=search&arg=" + q
-	r, _ := http.Get(u)
+	searchURL := "https://aur.archlinux.org/rpc/?v=5&type=search&arg=" + q
+	r, _ := http.Get(searchURL)
 	var aur AurResponse
 	json.NewDecoder(r.Body).Decode(&aur)
 	for _, res := range aur.Results { fmt.Println("📦", res.Name) }
