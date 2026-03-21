@@ -105,7 +105,6 @@ func checkUpdate(user string) {
 			fmt.Println("🗡️ Перековка Ken...")
 			tmp := "/tmp/ken-upgrade"
 			os.RemoveAll(tmp)
-			// Ссылка через +
 			gitURL := "https://github.com" + "/nespaset/ken"
 			runCommand("git", "clone", gitURL, tmp)
 			os.Chdir(tmp)
