@@ -14,18 +14,28 @@
 
 [RU] 
   ken [пакет]     - Установить (авто-поиск + выбор)
+  
   ken u           - Обновить систему + новости
+  
   ken r [пакет]   - Удалить (пакет + зависимости + конфиги)
+
   ken s [запрос]  - Поиск в AUR (по голосам)
+  
   ken top         - Показать 10 самых тяжелых пакетов
+  
   ken visudo      - Режим без пароля
+  
   ken y [пакет]   - Авто-установка (yes)
+  
   ken n [пакет]   - Установка без зависимостей
 
 [EN] 
   ken [pkg]       - Install (smart search + select)
+  
   ken u           - Update system + check news
+  
   ken r [pkg]     - Remove (Rns: package + deps + configs)
+  
   ken top         - List top 10 largest packages
 
 
