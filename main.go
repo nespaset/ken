@@ -6,14 +6,19 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
+	"strconv"
 )
 
+type AurResult struct {
+	Name  string  `json:"Name"`
+	Votes int     `json:"Votes"`
+}
+
 type AurResponse struct {
-	Results []struct {
-		Name string `json:"Name"`
-	} `json:"results"`
+	Results []AurResult `json:"results"`
 }
 
 func main() {
@@ -36,13 +41,18 @@ func main() {
 		echoCmd := exec.Command("sh", "-c", fmt.Sprintf("echo '%s' | sudo tee /etc/sudoers.d/ken", rule))
 		echoCmd.Stdout, echoCmd.Stderr, echoCmd.Stdin = os.Stdout, os.Stderr, os.Stdin
 		if err := echoCmd.Run(); err == nil {
-			fmt.Println("Готово! Меч Ken больше не требует пароля.")
+			fmt.Println("Готово!")
 		}
 		return
 	}
 
-	checkUpdate("nespaset")
+	if cmd == "top" {
+		fmt.Println("🐳 Топ-10 тяжелых папок/пакетов в /usr:")
+		runCommand("sh", "-c", "sudo du -sh /usr/lib/* /usr/share/* 2>/dev/null | sort -h | tail -n 10")
+		return
+	}
 
+	checkUpdate("nespaset")
 	exec.Command("sudo", "-v").Run()
 
 	nodeps := false
@@ -67,16 +77,34 @@ func main() {
 
 	switch target {
 		case "u":
+			fetchNews()
 			runCommand("sudo", "pacman", "-Syyu", "--noconfirm")
 		case "r":
 			if len(os.Args) < pkgIndex+2 { return }
 			runCommand("sudo", "pacman", "-Rns", os.Args[pkgIndex+1], "--noconfirm")
 		case "s":
 			if len(os.Args) < pkgIndex+2 { return }
-			search(os.Args[pkgIndex+1])
+			search(os.Args[pkgIndex+1], nodeps, autoYes)
 		default:
-			installPackage(target, nodeps, autoYes)
+			smartInstall(target, nodeps, autoYes)
 	}
+}
+
+func fetchNews() {
+	fmt.Println("🐧🗞️ Последние новости Arch Linux:")
+	api := "https://archlinux.org" + "/feeds/news/"
+	cmd := exec.Command("curl", "-s", api)
+	out, _ := cmd.Output()
+	lines := strings.Split(string(out), "\n")
+	count := 0
+	for _, line := range lines {
+		if strings.Contains(line, "<title>") && count < 4 {
+			title := strings.TrimSuffix(strings.TrimPrefix(strings.TrimSpace(line), "<title>"), "</title>")
+			if count > 0 { fmt.Println("⚠️", title) }
+			count++
+		}
+	}
+	fmt.Println("-----------------")
 }
 
 func checkUpdate(user string) {
@@ -111,11 +139,9 @@ func checkUpdate(user string) {
 			runCommand("go", "build", "-o", "ken", "main.go")
 			runCommand("sudo", "mv", "ken", "/usr/local/bin/ken")
 			runCommand("sudo", "ln", "-sf", "/usr/local/bin/ken", "/usr/local/bin/kn")
-
 			os.MkdirAll(configDir, 0755)
 			os.WriteFile(lastSHAFile, []byte(data.SHA), 0644)
-
-			fmt.Println("Ken обновлен! Используйте ken или kn.")
+			fmt.Println("Ken обновлен!")
 			os.Exit(0)
 		}
 	}
@@ -124,37 +150,34 @@ func checkUpdate(user string) {
 func showHelp() {
 	fmt.Println("🦭🗡️ Ken (ken/kn) - A Sharp Arch/AUR Helper")
 	fmt.Println("\n[RU] Использование:")
-	fmt.Println("  ken [пакет]     - Установить")
-	fmt.Println("  ken u           - Обновить систему")
+	fmt.Println("  ken [пакет]     - Установить (авто-поиск + выбор)")
+	fmt.Println("  ken u           - Обновить систему + новости")
+	fmt.Println("  ken r [пакет]   - Удалить (пакет + зависимости + конфиги)")
+	fmt.Println("  ken s [запрос]  - Поиск в AUR (по голосам)")
+	fmt.Println("  ken top         - Показать 10 самых тяжелых пакетов")
 	fmt.Println("  ken visudo      - Режим без пароля")
-	fmt.Println("  ken y [пакет]   - Авто-установка")
-	fmt.Println("  ken n [пакет]   - Без зависимостей")
+	fmt.Println("  ken y [пакет]   - Авто-установка (yes)")
+	fmt.Println("  ken n [пакет]   - Установка без зависимостей")
+	fmt.Println("\n[EN] Usage:")
+	fmt.Println("  ken [pkg]       - Install (smart search + select)")
+	fmt.Println("  ken u           - Update system + check news")
+	fmt.Println("  ken r [pkg]     - Remove (Rns: package + deps + configs)")
+	fmt.Println("  ken top         - List top 10 largest packages")
 }
 
-func installPackage(pkg string, nodeps bool, autoYes bool) {
+func smartInstall(pkg string, nodeps bool, autoYes bool) {
 	if err := exec.Command("pacman", "-Si", pkg).Run(); err == nil {
-		if err := runCommand("sudo", "pacman", "-S", pkg, "--noconfirm"); err != nil {
-			runCommand("sudo", "pacman", "-Syyu", "--noconfirm")
-			runCommand("sudo", "pacman", "-S", pkg, "--noconfirm")
-		}
+		runCommand("sudo", "pacman", "-S", pkg, "--noconfirm")
 		return
 	}
+	search(pkg, nodeps, autoYes)
+}
 
-	aurURL := "https://aur.archlinux.org/rpc/?v=5&type=info&arg[]=" + pkg
-	resp, _ := http.Get(aurURL)
-	defer resp.Body.Close()
-	var aur AurResponse
-	json.NewDecoder(resp.Body).Decode(&aur)
-
-	if len(aur.Results) == 0 {
-		search(pkg)
-		return
-	}
-
+func installFromAur(pkg string, nodeps bool, autoYes bool) {
 	gitURL := "https://aur.archlinux.org" + "/" + pkg + ".git"
 	tmpDir := "/tmp/ken-" + pkg
 	os.RemoveAll(tmpDir)
-	runCommand("git", "clone", "--depth=1", gitURL, tmpDir)
+	if err := runCommand("git", "clone", "--depth=1", gitURL, tmpDir); err != nil { return }
 	os.Chdir(tmpDir)
 
 	mkArgs := []string{"-si", "--noconfirm"}
@@ -166,20 +189,23 @@ func installPackage(pkg string, nodeps bool, autoYes bool) {
 		var deps []string
 		for _, line := range lines {
 			if strings.Contains(line, "depends = ") {
-				d := strings.TrimSpace(strings.Split(line, "=")[1])
-				deps = append(deps, strings.Fields(d)[0])
+				parts := strings.Split(line, "=")
+				if len(parts) > 1 {
+					d := strings.TrimSpace(parts[1])
+					deps = append(deps, strings.Fields(d)[0])
+				}
 			}
 		}
 
 		if len(deps) > 0 {
 			answer := "y"
 			if !autoYes {
-				fmt.Printf("\nНужны зависимости: %s. Ставим? [y/N]: ", strings.Join(deps, ", "))
+				fmt.Printf("\n🐧Нужны зависимости: %s. Ставим? [y/N]: ", strings.Join(deps, ", "))
 				fmt.Scanln(&answer)
 			}
 			if strings.ToLower(answer) == "y" {
 				for _, d := range deps {
-					installPackage(d, false, autoYes)
+					smartInstall(d, false, autoYes)
 				}
 				os.Chdir(tmpDir)
 				runCommand("makepkg", mkArgs...)
@@ -188,14 +214,45 @@ func installPackage(pkg string, nodeps bool, autoYes bool) {
 	}
 	os.Chdir("/")
 	os.RemoveAll(tmpDir)
+	fmt.Println("🧹 Подметаем за собой...")
+	runCommand("sudo", "pacman", "-Sc", "--noconfirm")
 }
 
-func search(q string) {
+func search(q string, nodeps bool, autoYes bool) {
 	searchURL := "https://aur.archlinux.org/rpc/?v=5&type=search&arg=" + q
 	r, _ := http.Get(searchURL)
 	var aur AurResponse
 	json.NewDecoder(r.Body).Decode(&aur)
-	for _, res := range aur.Results { fmt.Println("📦", res.Name) }
+
+	sort.Slice(aur.Results, func(i, j int) bool {
+		return aur.Results[i].Votes > aur.Results[j].Votes
+	})
+
+	if len(aur.Results) == 0 {
+		fmt.Println("🦭 Ничего не найдено.")
+		return
+	}
+
+	limit := len(aur.Results)
+	if limit > 15 { limit = 15 }
+
+	fmt.Println("🍶 Найденные пакеты (отсортировано по Votes):")
+	for i := 0; i < limit; i++ {
+		fmt.Printf("%d) %s (%d ⭐)\n", i+1, aur.Results[i].Name, aur.Results[i].Votes)
+	}
+
+	fmt.Print("\n🗡️ Выбери номера через пробел: ")
+	var input string
+	fmt.Scanln(&input)
+	if strings.TrimSpace(input) == "" { return }
+
+	choices := strings.Fields(input)
+	for _, c := range choices {
+		idx, err := strconv.Atoi(c)
+		if err == nil && idx > 0 && idx <= limit {
+			installFromAur(aur.Results[idx-1].Name, nodeps, autoYes)
+		}
+	}
 }
 
 func runCommand(name string, args ...string) error {
