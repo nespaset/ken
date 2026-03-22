@@ -49,7 +49,7 @@
 2. Склонируйте репозиторий:
    git clone https://github.com/nespaset/ken/
    
-   cd sake
+   cd ken
 
 4. Скомпилируйте и установите:
    go build -o ken main.go
