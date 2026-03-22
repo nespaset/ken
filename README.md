@@ -13,6 +13,7 @@
 ## Использование
 
 [RU] 
+
   ken [пакет]     - Установить (авто-поиск + выбор)
   
   ken u           - Обновить систему + новости
@@ -29,7 +30,8 @@
   
   ken n [пакет]   - Установка без зависимостей
 
-[EN] 
+[EN]
+
   ken [pkg]       - Install (smart search + select)
   
   ken u           - Update system + check news
